@@ -1,0 +1,234 @@
+#include "common.hlsl"
+
+#pragma kernel TraverseQuadTree
+#pragma kernel CreateNodeSectorMap
+#pragma kernel CreatePatch
+#pragma kernel BuildMinMaxHeightMapByHeightMap
+#pragma kernel BuildMinMaxHeightMapByMinMaxHeightMap
+#pragma kernel HeightToNormal
+
+#pragma multi_compile_local __ _REVERSE_Z
+#pragma multi_compile_local __ _OPENGL_ES_3
+#pragma multi_compile_local __ _VIEW_FRUSTUM_CULLING
+#pragma multi_compile_local __ _HIZ_CULLING
+
+float4 _ViewFrustumPlane[6];
+Texture2D<float2> _HeightMapRT;
+RWBuffer<half> _NodeBrunchList;
+StructuredBuffer<uint3> _FinalNodeList;
+AppendStructuredBuffer<uint3> _AppendFinalNodeList;
+AppendStructuredBuffer<uint2> _AppendList;
+ConsumeStructuredBuffer<uint2> _ConsumeList;
+AppendStructuredBuffer<RenderPatch> _CulledPatchList;
+RWTexture2D<float> _NodeSectorMap;
+float _max_height;
+int _CurLOD;
+
+inline bool EvaluateNode(uint2 nodeXY, int nodeSize)
+{
+    const float2 nodePos = nodeSize * (nodeXY + 0.5f);
+    const float dis = distance(_CameraWorldPos, float3(nodePos.x, 0, nodePos.y));
+    return dis / (nodeSize * _LodJudgeFactor) < 1.0;
+}
+
+inline uint GetSectorLOD(uint2 sectorLoc, uint lod)
+{
+    const uint num = _NodeStructs[0].NodeNum;
+    if (sectorLoc.x < 0 || sectorLoc.y < 0 || sectorLoc.x >= num || sectorLoc.y >= num)
+    {
+        return 0;
+    }
+    return round(_NodeSectorMap[sectorLoc].r * _MAXLOD) - lod;
+}
+
+inline void SetLODTrans(inout RenderPatch patch, uint2 nodeXY, uint2 patchXY, in NodeInfoStruct blockInfo)
+{
+    const uint lod = blockInfo.CurLOD;
+    const uint nodeScale = 1 << lod;
+    const uint2 sectorMin = nodeXY * nodeScale;
+    const uint2 sectorMax = sectorMin + nodeScale - 1;
+    uint4 lodTrans = 0;
+    if (patchXY.x == 0)
+        lodTrans.x = GetSectorLOD(sectorMin + int2(-1, 0), lod);
+    if (patchXY.y == 0)
+        lodTrans.y = GetSectorLOD(sectorMin + int2(0, -1), lod);
+    if (patchXY.x == _PerPacthGridNum - 1)
+        lodTrans.z = GetSectorLOD(sectorMax + int2(1, 0), lod);
+    if (patchXY.y == _PerPacthGridNum - 1)
+        lodTrans.w = GetSectorLOD(sectorMax + int2(0, 1), lod);
+    patch._lodTrans = lodTrans;
+}
+
+[numthreads(8, 8, 1)]
+void CreatePatch(uint3 id : SV_DispatchThreadID, uint3 groupId:SV_GroupID, uint3 groupThreadId:SV_GroupThreadID)
+{
+    uint3 nodeLODInfo = _FinalNodeList[groupId.x];
+    RenderPatch renderPatch = (RenderPatch)0;
+    const uint2 nodeXY = nodeLODInfo.xy;
+    const uint2 patchXY = groupThreadId.xy;
+    renderPatch._wpos.z = nodeLODInfo.z;
+
+    const NodeInfoStruct nodeInfo = _NodeStructs[renderPatch._wpos.z];
+    const uint2 nodePos = nodeInfo.NodeSize * nodeXY;
+    const uint2 patchPosInNode = nodeInfo.PacthSize * patchXY;
+    renderPatch._wpos.xy = nodePos + patchPosInNode;
+    const float3 wpos = float3(renderPatch._wpos.x, 0, renderPatch._wpos.y);
+
+    float2 minMaxHeight = _HeightMapRT.mips[nodeInfo.HeightMipLevel][nodeXY * _PerNodePacthNum + patchXY].xy;
+    const float3 boundMin = float3(0, minMaxHeight.x * _max_height, 0);
+    const float3 boundMax = float3(nodeInfo.PacthSize, minMaxHeight.y * _max_height, nodeInfo.PacthSize);
+    Bounds bounds;
+    bounds.minPosition = wpos + boundMin;
+    bounds.maxPosition = wpos + boundMax;
+
+    #if _VIEW_FRUSTUM_CULLING
+    if (IsFrustumCulling(bounds, _ViewFrustumPlane))
+        return;
+    #endif
+
+    #if _DEBUG_MIP
+    renderPatch._wpos.w = GetBoundsMip(bounds);
+    #endif
+    #if _HIZ_CULLING
+        if (IsHizCulling(bounds))
+            return;
+    #endif
+    SetLODTrans(renderPatch, nodeXY, patchXY, nodeInfo);
+    _CulledPatchList.Append(renderPatch);
+}
+
+
+[numthreads(8,8,1)]
+void CreateNodeSectorMap(uint3 id : SV_DispatchThreadID)
+{
+    const uint2 sectorXY = id.xy;
+    // [unroll]
+    for (int lod = _MAXLOD; lod >= 0; lod--)
+    {
+        uint2 nodeXY = sectorXY >> lod;
+        const NodeInfoStruct nodeInfo = _NodeStructs[lod];
+        const int nodeIndex = nodeInfo.Offset + nodeXY.y * nodeInfo.NodeNum + nodeXY.x;
+        if (_NodeBrunchList[nodeIndex] == 2)
+        {
+            _NodeSectorMap[sectorXY] = (float)lod / _MAXLOD;
+            return;
+        }
+    }
+    _NodeSectorMap[sectorXY] = 0;
+}
+
+[numthreads(1, 1, 1)]
+void TraverseQuadTree(uint3 id : SV_DispatchThreadID)
+{
+    uint2 nodeXY = _ConsumeList.Consume();
+    const NodeInfoStruct nodeLOD = _NodeStructs[_CurLOD];
+    const int nodeIndex = nodeLOD.Offset + nodeXY.y * nodeLOD.NodeNum + nodeXY.x;
+    if (_CurLOD > 0 && EvaluateNode(nodeXY, nodeLOD.NodeSize))
+    {
+        nodeXY *= 2;
+        _AppendList.Append(nodeXY);
+        _AppendList.Append(nodeXY + uint2(0, 1));
+        _AppendList.Append(nodeXY + uint2(1, 0));
+        _AppendList.Append(nodeXY + uint2(1, 1));
+        _NodeBrunchList[nodeIndex] = 1;
+    }
+    else
+    {
+        _AppendFinalNodeList.Append(uint3(nodeXY, _CurLOD));
+        _NodeBrunchList[nodeIndex] = 2;
+    }
+}
+
+Texture2D<float> heightMap;
+Texture2D<float2> inputMinMaxHeightMap;
+RWTexture2D<float2> outputMinMaxHeightMap;
+
+[numthreads(8,8,1)]
+void BuildMinMaxHeightMapByHeightMap(uint3 id : SV_DispatchThreadID)
+{
+    outputMinMaxHeightMap[id.xy] = heightMap[id.xy];
+}
+
+[numthreads(8, 8, 1)]
+void BuildMinMaxHeightMapByMinMaxHeightMap(uint3 id : SV_DispatchThreadID)
+{
+    const uint2 uv = id.xy * 2;
+    const float2 h1 = inputMinMaxHeightMap[uv];
+    const float2 h2 = inputMinMaxHeightMap[uv + uint2(1, 0)];
+    const float2 h3 = inputMinMaxHeightMap[uv + uint2(0, 1)];
+    const float2 h4 = inputMinMaxHeightMap[uv + uint2(1, 1)];
+
+    float hMin = min(min(h1.x, h2.x), min(h3.x, h4.x));
+    float hMax = max(max(h1.y, h2.y), max(h3.y, h4.y));
+    outputMinMaxHeightMap[id.xy] = float2(hMin, hMax);
+}
+
+float _dz;
+float _invertR;
+float _invertG;
+float _invertH;
+int _type = 0;
+int _heightOffset;
+Texture2D<float3> _HeightTex;
+RWTexture2D<float3> _NormalTex;
+
+[numthreads(8, 8, 1)]
+void HeightToNormal(uint3 id : SV_DispatchThreadID)
+{
+    int w, h;
+    _HeightTex.GetDimensions(w, h);
+    float2 size = float2(w, h);
+    float2 vUv = id.xy;
+    float2 _step = float2(-1, -1);
+
+    float2 tlv = float2(vUv.x - _step.x, vUv.y + _step.y);
+    float2 lv = float2(vUv.x - _step.x, vUv.y);
+    float2 blv = float2(vUv.x - _step.x, vUv.y - _step.y);
+    float2 tv = float2(vUv.x, vUv.y + _step.y);
+    float2 bv = float2(vUv.x, vUv.y - _step.y);
+    float2 trv = float2(vUv.x + _step.x, vUv.y + _step.y);
+    float2 rv = float2(vUv.x + _step.x, vUv.y);
+    float2 brv = float2(vUv.x + _step.x, vUv.y - _step.y);
+
+    tlv = float2(tlv.x >= 0.0 ? tlv.x : (size.x + tlv.x), tlv.y >= 0.0 ? tlv.y : (size.y + tlv.y));
+    tlv = float2(tlv.x < size.x ? tlv.x : (tlv.x - size.x), tlv.y < size.y ? tlv.y : (tlv.y - size.y));
+    lv = float2(lv.x >= 0.0 ? lv.x : (size.x + lv.x), lv.y >= 0.0 ? lv.y : (size.y + lv.y));
+    lv = float2(lv.x < size.x ? lv.x : (lv.x - size.x), lv.y < size.y ? lv.y : (lv.y - size.y));
+    blv = float2(blv.x >= 0.0 ? blv.x : (size.x + blv.x), blv.y >= 0.0 ? blv.y : (size.y + blv.y));
+    blv = float2(blv.x < size.x ? blv.x : (blv.x - size.x), blv.y < size.y ? blv.y : (blv.y - size.y));
+    tv = float2(tv.x >= 0.0 ? tv.x : (size.x + tv.x), tv.y >= 0.0 ? tv.y : (size.y + tv.y));
+    tv = float2(tv.x < size.x ? tv.x : (tv.x - size.x), tv.y < size.y ? tv.y : (tv.y - size.y));
+    bv = float2(bv.x >= 0.0 ? bv.x : (size.x + bv.x), bv.y >= 0.0 ? bv.y : (size.y + bv.y));
+    bv = float2(bv.x < size.x ? bv.x : (bv.x - size.x), bv.y < size.y ? bv.y : (bv.y - size.y));
+    trv = float2(trv.x >= 0.0 ? trv.x : (size.x + trv.x), trv.y >= 0.0 ? trv.y : (size.y + trv.y));
+    trv = float2(trv.x < size.x ? trv.x : (trv.x - size.x), trv.y < size.y ? trv.y : (trv.y - size.y));
+    rv = float2(rv.x >= 0.0 ? rv.x : (size.x + rv.x), rv.y >= 0.0 ? rv.y : (size.y + rv.y));
+    rv = float2(rv.x < size.x ? rv.x : (rv.x - size.x), rv.y < size.y ? rv.y : (rv.y - size.y));
+    brv = float2(brv.x >= 0.0 ? brv.x : (size.x + brv.x), brv.y >= 0.0 ? brv.y : (size.y + brv.y));
+    brv = float2(brv.x < size.x ? brv.x : (brv.x - size.x), brv.y < size.y ? brv.y : (brv.y - size.y));
+
+    float tl = abs(_HeightTex[tlv].r);
+    float l = abs(_HeightTex[lv].r);
+    float bl = abs(_HeightTex[blv].r);
+    float t = abs(_HeightTex[tv].r);
+    float b = abs(_HeightTex[bv].r);
+    float tr = abs(_HeightTex[trv].r);
+    float r = abs(_HeightTex[rv].r);
+    float br = abs(_HeightTex[brv].r);
+
+    float dx = 0.0, dy = 0.0;
+    if (_type == 0) // Sobel
+    {
+        dx = tl + l * 2.0 + bl - tr - r * 2.0 - br;
+        dy = tl + t * 2.0 + tr - bl - b * 2.0 - br;
+    }
+    else
+    {
+        // Scharr
+        dx = tl * 3.0 + l * 10.0 + bl * 3.0 - tr * 3.0 - r * 10.0 - br * 3.0;
+        dy = tl * 3.0 + t * 10.0 + tr * 3.0 - bl * 3.0 - b * 10.0 - br * 3.0;
+    }
+
+    float3 normal = normalize(float3(dx * _invertR * _invertH * 255.0, dy * _invertG * _invertH * 255.0, _dz));
+    _NormalTex[id.xy] = (_heightOffset == 0) ? (normal.xy * 0.5 + 0.5, normal.z) : (normal.xyz * 0.5 + 0.5);
+}
