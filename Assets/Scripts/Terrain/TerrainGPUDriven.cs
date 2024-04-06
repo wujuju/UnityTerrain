@@ -115,10 +115,10 @@ public class TerrainGPUDriven
         _argArr[2] = (uint)_mesh.GetIndexStart(subMeshIndex);
         _argArr[3] = (uint)_mesh.GetBaseVertex(subMeshIndex);
 
-        _gValue._MAXLOD = 0;
         int totalNodeNum = 0;
         int nodeNum = _gValue._SplitNum;
-        while ((terrainSize / nodeNum) >> _gValue._MAXLOD > Pow2(_gValue._PerPacthSize))
+        _gValue._MAXLOD = 1;
+        while (terrainSize / (nodeNum << _gValue._MAXLOD) / _gValue._PerNodePacthNum / _gValue._PerPacthSize > 1)
         {
             _gValue._MAXLOD++;
         }
@@ -302,11 +302,11 @@ public class TerrainGPUDriven
         _cs.GetKernelThreadGroupSizes(kernelIndex, out var x, out var y, out var z);
         if (x != _gValue._PerNodePacthNum)
         {
-            throw new Exception("x != globalValue._PerPacthSize");
+            throw new Exception($"compute shader numthreads != {_gValue._PerNodePacthNum}");
         }
 #endif
     }
-    
+
     private void CreateSectorMap(CommandBuffer command, int kernelIndex)
     {
         var size = _nodeStructs[0].NodeNum;
