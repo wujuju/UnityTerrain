@@ -561,7 +561,7 @@ void SplatmapFragment2(
 
 可以看下和`unity`默认`Terrain`的对比，`Batches=24`是我们的地形
 
-`CPU`端肯定没提升，我们计算都在`GPU`的，提升`1-2`毫秒左右
+`CPU`端肯定没提升，我们计算都在`GPU`的，提升`0.1-0.2`毫秒左右
 
 为啥看起来不一样？我用的`m1`的`MBP`，无法使用`Geometry Shaders`，没办法重新算一次法线
 
