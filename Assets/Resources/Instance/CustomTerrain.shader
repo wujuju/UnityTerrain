@@ -48,7 +48,6 @@ Shader "Custom/Instance2"
             };
 
             float4 _MainTex_ST;
-            float _Max_Height;
             Texture2DArray<float4> _MixedDiffuseTex;
             SamplerState samplerLinearClamp;
             SamplerState samplerLinearClamp2;
@@ -120,16 +119,11 @@ Shader "Custom/Instance2"
             float4 samplePageMipLevelTable(float2 uv, uint mipLevel)
             {
                 int mipLevelSize = _MipLevelList[mipLevel].x;
-                // if (mipLevel == 0)
-                //     return float4(0.5, 0, 0, 1);
-                // if (mipLevel == 1)
-                //     return float4(1, 0, 0, 1);
                 float4 indirectTalble = _IndirectMap[uint3(uv * mipLevelSize % _IndirectSize, mipLevel)];
                 int phyId = (int)(indirectTalble.z);
                 if (indirectTalble.w == 0)
                 {
                     mipLevel = mipLevel + 1;
-                    // indirectTalble.xy = indirectTalble.xy *0.5;
                     mipLevelSize = _MipLevelList[mipLevel].x;
                 }
                 float3 uvNew = float3(
@@ -138,36 +132,6 @@ Shader "Custom/Instance2"
                     phyId);
                 int lod = CalcLod(uvNew.xy * (1 << 9));
                 lod = clamp(lod, 0, 6);
-                // if (phyId==106)
-                // return float4(0, 1, 0, 1);
-                // uint2 xz=uv*mipLevelSize% _IndirectSize;
-                //652:91
-                // if (xz.x == 12 && xz.y ==  27 )
-                //     return float4(0, 1, 0, 1);
-                // if (mipLevel == 1)
-                //     return float4(1, 0, 0, 1);
-                // if (mipLevel == 2)
-                //     return float4(0, 0.5, 0, 1);
-                // if (mipLevel == 3)
-                //     return float4(0, 1, 0, 1);
-                // if (mipLevel == 4)
-                //     return float4(0, 0, 0.5, 1);
-                // if (mipLevel == 5)
-                //     return float4(0, 0, 1, 1);
-                // if (mipLevel == 6)
-                //     return float4(0, 0.5, 0.5, 1);
-                // if (mipLevel == 7)
-                //     return float4(0, 1, 1, 1);
-                // if (phyId == 55)
-                //    return float4(1, 0, 0, 1);
-                // if (phyId == 0)
-                //     return float4(0, 0, 1, 1);
-                // float4 result = SAMPLE_TEXTURE2D_ARRAY_GRAD(_MainTex, samplerLinearClamp, uvNew.xy, uvNew.z, ddxUV,
-                //                   ddyUV);
-                // if (lod == 0)
-                // return float4(0, 0, 1, 1);
-                // return float4(GetMipColor(lod),1);
-                // float4 result = SAMPLE_TEXTURE2D_ARRAY_LOD(_MainTex, samplerLinearClamp, uvNew.xy, uvNew.z,mipLevel*2);
                 float4 result = SAMPLE_TEXTURE2D_ARRAY_LOD(_MixedDiffuseTex, samplerLinearClamp, uvNew.xy, uvNew.z, lod);
                 return result;
             }
@@ -182,8 +146,6 @@ Shader "Custom/Instance2"
                 //     SAMPLE_TEXTURE2D_ARRAY(_NormapTex, samplerNormalLinearClamp, i.uv.xy, i.rtIndex));
                 uint absMax = max(abs((int)_CurrentSectorXY.x - (int)(i.uv.x * _SectorCountX)),
                                    abs((int)_CurrentSectorXY.y - (int)(i.uv.y * _SectorCountY)));
-                // uint mipLevel = clamp(absMax / (float)_SectorCountX, 0, 1.) * _MipLevelMax;
-
                 int mipLevelSign = (int)floor((-2.0f * _MipInitial - _MipDifference +
                         sqrt(8.0f * _MipDifference * absMax +
                             (2.0f * _MipInitial - _MipDifference) *

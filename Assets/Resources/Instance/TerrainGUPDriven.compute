@@ -21,8 +21,6 @@ AppendStructuredBuffer<uint2> _AppendList;
 ConsumeStructuredBuffer<uint2> _ConsumeList;
 AppendStructuredBuffer<RenderPatch> _CulledPatchList;
 RWTexture2D<float> _NodeSectorMap;
-StructuredBuffer<uint> stack;
-float _Max_Height;
 int _CurLOD;
 
 uint GetBoundsMip(Bounds bounds)

@@ -4,6 +4,7 @@
 Texture2D<float> _HizMap;
 uniform float4x4 _VPMatrix;
 StructuredBuffer<NodeInfoStruct> _NodeStructs;
+float _Max_Height;
 
 struct Bounds
 {

@@ -23,6 +23,7 @@ public class VirtualTexture
     private Queue<Chunk> _taskList;
     private Vector2Int _RTSize;
     public static TerrainBlenderInfo[] terrainBlenderInfos;
+    private Dictionary<int, int> mipLUTs = new Dictionary<int, int>();
     private RenderTexture tempNullRt;
     public ComputeBuffer mipLevelBuffer;
     private MipLevel[] pageMipLevelTable;
@@ -46,7 +47,6 @@ public class VirtualTexture
     private int sectorCount;
     private int cameraSector = -1;
     private int lastSector = -1;
-    private bool clearPreviousTask;
 
     public VirtualTexture(int size)
     {
@@ -93,9 +93,7 @@ public class VirtualTexture
         sectorLength = terrainLengthTotal / sectorCountZ;
         sectorCount = sectorCountX * sectorCountZ;
     }
-
-    private Dictionary<int, int> mipLUTs = new Dictionary<int, int>();
-
+    
     void InitializeMipLevle()
     {
         totalRTCount = 0;
@@ -152,8 +150,8 @@ public class VirtualTexture
             if (!chunk.isFix)
             {
                 // _curRTIdList.Remove2Last(chunk.phyId);
-                _curRTIdList.Remove(chunk.phyId);
-                _curRTIdList.AddLast(chunk.phyId);
+                _curRTIdList.Remove(chunk.phyTile);
+                _curRTIdList.AddLast(chunk.phyTile);
             }
         }
         else
@@ -186,8 +184,6 @@ public class VirtualTexture
         if (cameraSector != lastSector)
         {
             cmd.SetGlobalVector(TerrainConfig.SID_CurrentSectorXY, new Vector2(cameraXZ.x, cameraXZ.y));
-            if (clearPreviousTask)
-                _taskList.Clear();
             Profiler.BeginSample("Terrain_UpdateSector");
             //200
             //150  mipLUTs
@@ -262,8 +258,7 @@ public class VirtualTexture
         cmd.SetComputeVectorParam(_computeShader, TerrainConfig.SID_Node_ST, tileST);
         cmd.SetComputeIntParam(_computeShader, TerrainConfig.SID_ZIndex, phyTile.Value.Value);
 
-
-        Vector2Int cameraXZ = SectorToXZ(cameraSector);
+        // Vector2Int cameraXZ = SectorToXZ(cameraSector);
         // Debug.LogError(string.Format("mipLevel:{0}  chunkXZ:{1}:{2} xz:{3}:{4} c:{5}:{6} rtId:{7}",
         //     mipLevel, chunkXZ.x, chunkXZ.y,
         //     chunkXZ.x % IndirectSize, chunkXZ.y % IndirectSize,
@@ -272,7 +267,7 @@ public class VirtualTexture
         indirectTasks[currIndirectTaskNum++] = new int4(chunkXZ.x, chunkXZ.y, mipLevel, phyTile.Value.Value);
 
         TerrainConfig.Dispatch(cmd, _computeShader, 0, _RTSize);
-        chunk.phyId = phyTile;
+        chunk.phyTile = phyTile;
         chunk.isCreate = true;
         chunk.isInQueue = false;
         if (mipLevel == MipLevelMax)
@@ -381,11 +376,9 @@ public class VirtualTexture
     {
         public bool isInQueue;
         public bool isCreate;
-
         public bool isFix;
-
         // public LinkedTile phyId;
-        public LinkedListNode<LinkedTile> phyId;
+        public LinkedListNode<LinkedTile> phyTile;
         public int mipLevel;
         public Vector2Int xz;
 
@@ -486,10 +479,8 @@ public class VirtualTexture
         {
             Value = i;
         }
-
         public override string ToString()
         {
-            // prev != null ? prev.Value.ToString() ? "0", Value.ToString(), prev != null ? prev.Value.ToString() ? 0
             return string.Format("{0}-{1}-{2}", prev != null ? prev.Value : 0, Value, next != null ? next.Value : 0);
         }
     }

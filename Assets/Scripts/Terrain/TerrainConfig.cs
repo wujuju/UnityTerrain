@@ -21,7 +21,7 @@ public class TerrainConfig
     public static int SID_CulledPatchList;
     public static int SID_ArgsBuffer;
     public static int SID_BlockPatchList;
-    public static int SID_BlockLODList;
+    public static int SID_NodeStructs;
     public static int SID_MipLevelList;
     public static int SID_HeightMapRT;
     public static int SID_NodeSectorMap;
@@ -60,12 +60,10 @@ public class TerrainConfig
             if (field.Name.StartsWith("SID_"))
             {
                 var id = Shader.PropertyToID(field.Name.Replace("SID", ""));
-                if (id == 0)
-                    throw new Exception("Shader.PropertyToID not find:" + field.Name);
                 field.SetValue(null, id);
             }
         }
-        Debug.LogError(staticFields.Length);
+        // Debug.LogError(staticFields.Length);
     }
 
     public static int GetHeightMipLevelBySize(int size, int pixSize)
@@ -165,42 +163,6 @@ public class TerrainConfig
         texture.filterMode = filterMode;
         texture.Create();
         return texture;
-    }
-
-    public static void SetComputeShaderConstant(Type structType, object cb, CommandBuffer cs, bool isMember = false)
-    {
-        FieldInfo[] fields = structType.GetFields(BindingFlags.Public | BindingFlags.Instance);
-        foreach (FieldInfo field in fields)
-        {
-            var value = field.GetValue(cb);
-            string fileName = field.Name;
-            if (isMember)
-                fileName = "_" + fileName;
-            if (field.FieldType == typeof(float))
-            {
-                cs.SetGlobalFloat(fileName, (float)value);
-            }
-            else if (field.FieldType == typeof(int))
-            {
-                cs.SetGlobalInt(fileName, (int)value);
-            }
-            else if (field.FieldType == typeof(Vector2))
-            {
-                cs.SetGlobalVector(fileName, (Vector2)value);
-            }
-            else if (field.FieldType == typeof(Vector3))
-            {
-                cs.SetGlobalVector(fileName, (Vector3)value);
-            }
-            else if (field.FieldType == typeof(Vector4))
-            {
-                cs.SetGlobalVector(fileName, (Vector4)value);
-            }
-            else
-            {
-                throw new Exception("not find type:" + field.FieldType);
-            }
-        }
     }
 }
 

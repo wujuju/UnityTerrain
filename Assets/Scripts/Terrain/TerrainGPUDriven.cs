@@ -202,7 +202,7 @@ public class TerrainGPUDriven
         _gValue._CameraWorldPos = camera.transform.position;
         cmd.SetGlobalMatrix(TerrainConfig.SID_VPMatrix, lastFrameVPMatrix);
         cmd.SetGlobalTexture(TerrainConfig.SID_HeightMapRT, _heightRT);
-        cmd.SetGlobalBuffer(TerrainConfig.SID_BlockLODList, _nodeStructsBuffer);
+        cmd.SetGlobalBuffer(TerrainConfig.SID_NodeStructs, _nodeStructsBuffer);
         cmd.SetGlobalVectorArray(TerrainConfig.SID_ViewFrustumPlane,
             TerrainConfig.CalculateCameraVector4(camera));
 
