@@ -1,0 +1,196 @@
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "TerrainInfoStruct.cs.hlsl"
+#pragma kernel TerrainBlender
+#pragma kernel TerrainIndirectMipMap
+#pragma kernel TerrainCheckIndirectMipMap
+#define MY_SAMPLE_TEXTURE2D(textureName,samplerName,coord2) textureName.SampleLevel(samplerName, coord2,0)
+#define TEXTURE2D_SPLAT(textureName) TEXTURE2D(textureName);float4 _ST##textureName
+#define SAMPLE_SPLAT(index,uv)                MY_SAMPLE_TEXTURE2D(_Splat##index,sampler_Splat##index,_ST_Splat##index.xy*uv  + _ST_Splat##index.zw)
+#define SAMPLE_NORMAL(index,uv)       UnpackNormalScale(MY_SAMPLE_TEXTURE2D(_Normal##index,sampler_Control0, uv), 1)
+
+float4 _ST_Control0;
+float4 _ST_Control2;
+float4 _ST_Control1;
+TEXTURE2D(_Control0);
+SAMPLER(sampler_Control0);
+SAMPLER(sampler_Control1);
+SAMPLER(sampler_Control2);
+TEXTURE2D(_Control1);
+TEXTURE2D(_Control2);
+
+
+SAMPLER(sampler_Splat0);
+SAMPLER(sampler_Splat1);
+SAMPLER(sampler_Splat2);
+SAMPLER(sampler_Splat3);
+SAMPLER(sampler_Splat4);
+SAMPLER(sampler_Splat5);
+SAMPLER(sampler_Splat6);
+SAMPLER(sampler_Splat7);
+SAMPLER(sampler_Splat8);
+SAMPLER(sampler_Splat9);
+SAMPLER(sampler_Splat10);
+SAMPLER(sampler_Splat11);
+TEXTURE2D_SPLAT(_Splat0);
+TEXTURE2D_SPLAT(_Splat1);
+TEXTURE2D_SPLAT(_Splat2);
+TEXTURE2D_SPLAT(_Splat3);
+TEXTURE2D_SPLAT(_Splat4);
+TEXTURE2D_SPLAT(_Splat5);
+TEXTURE2D_SPLAT(_Splat6);
+TEXTURE2D_SPLAT(_Splat7);
+TEXTURE2D_SPLAT(_Splat8);
+TEXTURE2D_SPLAT(_Splat9);
+TEXTURE2D_SPLAT(_Splat10);
+TEXTURE2D_SPLAT(_Splat11);
+
+TEXTURE2D(_Normal0);
+TEXTURE2D(_Normal1);
+TEXTURE2D(_Normal2);
+TEXTURE2D(_Normal3);
+TEXTURE2D(_Normal4);
+TEXTURE2D(_Normal5);
+TEXTURE2D(_Normal6);
+TEXTURE2D(_Normal7);
+TEXTURE2D(_Normal8);
+TEXTURE2D(_Normal9);
+TEXTURE2D(_Normal10);
+TEXTURE2D(_Normal11);
+
+float2 _TerrainTexSize;
+float4 _Node_ST;
+uint _ZIndex;
+
+RWTexture2DArray<float4> _MixedDiffuseTex;
+RWTexture2DArray<float4> _MixedNormalTex;
+RWTexture2DArray<float4> _IndirectMap;
+StructuredBuffer<uint4> _IndirectList;
+StructuredBuffer<int2> _MipLevelList;
+int _IndirectSize;
+
+[numthreads(1, 1, 1)]
+void TerrainIndirectMipMap(uint3 id : SV_DispatchThreadID)
+{
+    uint4 data = _IndirectList[id.x];
+    int mipLevel = data.z;
+    int mipLevelSize = _MipLevelList[mipLevel].x;
+    if (data.w == 0)
+        _IndirectMap[uint3(data.xy % _IndirectSize, mipLevel)] = 0;
+    else
+        _IndirectMap[uint3(data.xy % _IndirectSize, mipLevel)] = float4(data.x / (float)mipLevelSize,
+                                                                        data.y / (float)mipLevelSize,
+                                                                        data.w, 1);
+}
+
+#define MipLevelMax 7
+int2 _CurrentSectorXY;
+
+[numthreads(8, 8, 1)]
+void TerrainCheckIndirectMipMap(uint3 id : SV_DispatchThreadID)
+{
+    uint2 src_uv = id.xy;
+    int mipLevel = MipLevelMax - id.z - 1;
+    int2 mipLevelSize = _MipLevelList[mipLevel];
+    uint2 target_uv;
+    if (mipLevelSize.x > _IndirectSize)
+    {
+        int2 pos = src_uv - (_IndirectSize >> 1) + (_CurrentSectorXY >> mipLevel);
+        if (pos.x < 0 || pos.y < 0)
+            return;
+        src_uv = pos % _IndirectSize;
+        target_uv = (pos >> 1) % _IndirectSize;
+    }
+    else
+    {
+        target_uv = src_uv >> 1;
+    }
+    float4 info = _IndirectMap[uint3(src_uv, mipLevel)];
+    // w=1表示固定值
+    if (info.w > 0)
+        return;
+
+    info = _IndirectMap[uint3(target_uv, mipLevel + 1)];
+    if (info.w > 0 && info.z > 0)
+        _IndirectMap[uint3(src_uv, mipLevel)] = float4(info.xy, info.z, 0);
+}
+
+[numthreads(8, 8, 1)]
+void TerrainBlender(uint3 id : SV_DispatchThreadID)
+{
+    float2 uv = (id.xy + 0.5) / _TerrainTexSize;
+    uv = uv * _Node_ST.xy + _Node_ST.zw;
+    float4 splatControl0 = MY_SAMPLE_TEXTURE2D(_Control0, sampler_Control0,
+                                               (uv * (_ST_Control0.zw - 1.0f) + 0.5f) * _ST_Control0.xy);
+    float4 splatControl1 = MY_SAMPLE_TEXTURE2D(_Control1, sampler_Control1,
+                                               (uv * (_ST_Control1.zw - 1.0f) + 0.5f) * _ST_Control1.xy);
+    float4 splatControl2 = MY_SAMPLE_TEXTURE2D(_Control2, sampler_Control2,
+                                               (uv * (_ST_Control2.zw - 1.0f) + 0.5f) * _ST_Control2.xy);
+
+    float4 diffAlbedo0 = SAMPLE_SPLAT(0, uv);
+    float4 diffAlbedo1 = SAMPLE_SPLAT(1, uv);
+    float4 diffAlbedo2 = SAMPLE_SPLAT(2, uv);
+    float4 diffAlbedo3 = SAMPLE_SPLAT(3, uv);
+    float4 diffAlbedo4 = SAMPLE_SPLAT(4, uv);
+    float4 diffAlbedo5 = SAMPLE_SPLAT(5, uv);
+    float4 diffAlbedo6 = SAMPLE_SPLAT(6, uv);
+    float4 diffAlbedo7 = SAMPLE_SPLAT(7, uv);
+    float4 diffAlbedo8 = SAMPLE_SPLAT(8, uv);
+    float4 diffAlbedo9 = SAMPLE_SPLAT(9, uv);
+    float4 diffAlbedo10 = SAMPLE_SPLAT(10, uv);
+    float4 diffAlbedo11 = SAMPLE_SPLAT(11, uv);
+
+    half3 nrm0 = SAMPLE_NORMAL(0, uv);
+    half3 nrm1 = SAMPLE_NORMAL(1, uv);
+    half3 nrm2 = SAMPLE_NORMAL(2, uv);
+    half3 nrm3 = SAMPLE_NORMAL(3, uv);
+    half3 nrm4 = SAMPLE_NORMAL(4, uv);
+    half3 nrm5 = SAMPLE_NORMAL(5, uv);
+    half3 nrm6 = SAMPLE_NORMAL(6, uv);
+    half3 nrm7 = SAMPLE_NORMAL(7, uv);
+    half3 nrm8 = SAMPLE_NORMAL(8, uv);
+    half3 nrm9 = SAMPLE_NORMAL(9, uv);
+    half3 nrm10 = SAMPLE_NORMAL(10, uv);
+    half3 nrm11 = SAMPLE_NORMAL(11, uv);
+
+    const float weight = dot(splatControl0, 1) + dot(splatControl1, 1) + dot(splatControl2, 1);
+    splatControl0 /= (dot(splatControl0, 1) + 6.103515625e-5);
+    splatControl1 /= (dot(splatControl1, 1) + 6.103515625e-5);
+    splatControl2 /= (dot(splatControl2, 1) + 6.103515625e-5);
+
+    float4 mixedDiffuse =
+        diffAlbedo0 * splatControl0.r
+        + diffAlbedo1 * splatControl0.g
+        + diffAlbedo2 * splatControl0.b
+        + diffAlbedo3 * splatControl0.a
+        + diffAlbedo4 * splatControl1.r
+        + diffAlbedo5 * splatControl1.g
+        + diffAlbedo6 * splatControl1.b
+        + diffAlbedo7 * splatControl1.a
+        + diffAlbedo8 * splatControl2.r
+        + diffAlbedo9 * splatControl2.g
+        + diffAlbedo10 * splatControl2.b
+        + diffAlbedo11 * splatControl2.a;
+
+    half3 mixedNormal = nrm0 * splatControl0.r
+            + nrm1 * splatControl0.g
+            + nrm2 * splatControl0.b
+            + nrm3 * splatControl0.a
+            + nrm4 * splatControl1.r
+            + nrm5 * splatControl1.g
+            + nrm6 * splatControl1.b
+            + nrm7 * splatControl1.a
+        // + nrm8 * splatControl2.r
+        // + nrm9 * splatControl2.g
+        // + nrm10 * splatControl2.b
+        // + nrm11 * splatControl2.a
+        ;
+    #if HAS_HALF
+    mixedNormal.z += half(0.01);
+    #else
+    mixedNormal.z += 1e-5f;
+    #endif
+    mixedNormal = normalize(mixedNormal);
+    mixedNormal.z = weight;
+    _MixedDiffuseTex[uint3(id.xy, _ZIndex)] = float4(mixedDiffuse.rgb, 1);
+    _MixedNormalTex[uint3(id.xy, _ZIndex)] = float4(mixedNormal, 1);
+}

@@ -12,6 +12,7 @@ int HeightMipLevel;
 };
 struct RenderPatch
 {
+uint4 _vt;
 uint4 _wpos;
 uint4 _lodTrans;
 };

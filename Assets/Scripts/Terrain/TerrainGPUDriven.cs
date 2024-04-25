@@ -16,6 +16,7 @@ public class TerrainGPUDriven
     private int subMeshIndex = 0;
     private uint[] _argArr = new uint[4];
     public static Vector3Int HIZ_MAP_SIZE = new Vector3Int(2048, 2048, 4 * 2 - 1);
+    private VirtualTexture _virtualTexture;
 
     private ComputeBuffer mDispatchArgsBuffer =
         new ComputeBuffer(3, sizeof(float), ComputeBufferType.IndirectArguments);
@@ -27,7 +28,6 @@ public class TerrainGPUDriven
     private ComputeBuffer _argsBuffer;
     private ComputeBuffer _finalNodeList;
     private ComputeBuffer _nodeBrunchList;
-    private ComputeBuffer _uploadGValueStructBuffer;
     private ComputeBuffer _initialNodeList;
     private ComputeBuffer _nodeBufferA;
     private ComputeBuffer _nodeBufferB;
@@ -54,8 +54,11 @@ public class TerrainGPUDriven
         };
     }
 
-    public void CreateHeightMap(Texture2D heightMap)
+    private float maxHeight;
+
+    public void CreateHeightMap(Texture2D heightMap, float maxHeight)
     {
+        this.maxHeight = maxHeight;
         int kBuildMinMaxHeightMap = _cs.FindKernel("BuildMinMaxHeightMapByHeightMap");
         int kBuildMinMaxHeightMapMipLevel = _cs.FindKernel("BuildMinMaxHeightMapByMinMaxHeightMap");
 
@@ -155,13 +158,14 @@ public class TerrainGPUDriven
         _nodeBufferA = new ComputeBuffer(totalNodeNum, bufferSize * 2, ComputeBufferType.Append);
         _nodeBufferB = new ComputeBuffer(totalNodeNum, bufferSize * 2, ComputeBufferType.Append);
         _nodeBrunchList = new ComputeBuffer(totalNodeNum, sizeof(byte) * 2);
-
         for (int i = _gValue._MAXLOD; i >= 0; i--)
         {
             totalNodeNum -= Pow2(_nodeStructs[i].NodeNum);
             _nodeStructs[i].Offset = totalNodeNum;
         }
 
+
+        _virtualTexture = new VirtualTexture(512);
         _nodeStructsBuffer = new ComputeBuffer(_nodeStructs.Length, Marshal.SizeOf(typeof(NodeInfoStruct)));
         _currNodeStructBuffer = new ComputeBuffer(1, Marshal.SizeOf(typeof(NodeInfoStruct)));
         _nodeStructsBuffer.SetData(_nodeStructs);
@@ -176,11 +180,6 @@ public class TerrainGPUDriven
         }
 
         _initialNodeList.SetData(nodeBufferDatas);
-
-
-        bufferSize = Marshal.SizeOf(typeof(GlobalValue));
-        _uploadGValueStructBuffer = new ComputeBuffer(1, bufferSize);
-        _uploadGValueStructBuffer.SetData(new GlobalValue[] { _gValue });
         var size = _nodeStructs[0].NodeNum;
         var descriptor = new RenderTextureDescriptor(size, size, RenderTextureFormat.R8, 0, 1);
         descriptor.autoGenerateMips = false;
@@ -221,6 +220,7 @@ public class TerrainGPUDriven
             Profiler.BeginSample("Terrain_CreatePatch");
             CreatePatch(cmd, TerrainConfig.K_CreatePatch);
             Profiler.EndSample();
+            _virtualTexture.Update(cmd, _gValue._CameraWorldPos);
         }
 
         Profiler.BeginSample("Terrain_CreateTerrain");
@@ -230,6 +230,17 @@ public class TerrainGPUDriven
 
     private void InitNodeBuffer(CommandBuffer cmd)
     {
+        _material.SetFloat(TerrainConfig.SID_MipInitial, VirtualTexture.MipInitial);
+        _material.SetFloat(TerrainConfig.SID_MipDifference, VirtualTexture.MipDifference);
+        _material.SetFloat(TerrainConfig.SID_MipLevelMax, VirtualTexture.MipLevelMax);
+        cmd.SetGlobalInteger(TerrainConfig.SID_IndirectSize, VirtualTexture.IndirectSize);
+        _material.SetTexture(TerrainConfig.SID_MixedDiffuseTex, _virtualTexture.albedoMap);
+        _material.SetTexture(TerrainConfig.SID_MixedNormalTex, _virtualTexture.normalMap);
+        _material.SetInt(TerrainConfig.SID_SectorCountX, _virtualTexture.sectorCountX);
+        _material.SetInt(TerrainConfig.SID_SectorCountY, _virtualTexture.sectorCountZ);
+        _material.SetTexture(TerrainConfig.SID_IndirectMap, _virtualTexture.indirectMap);
+        _material.SetBuffer(TerrainConfig.SID_MipLevelList, _virtualTexture.mipLevelBuffer);
+        cmd.SetGlobalFloat(TerrainConfig.SID_Max_Height, maxHeight);
         cmd.SetBufferCounterValue(_finalNodeList, 0);
         cmd.SetBufferCounterValue(_nodeBufferA, 0);
         cmd.SetBufferCounterValue(_nodeBufferB, 0);
@@ -237,11 +248,7 @@ public class TerrainGPUDriven
         cmd.SetBufferCounterValue(_culledPatchList, 0);
         cmd.SetBufferCounterValue(_initialNodeList, (uint)Pow2(_gValue._SplitNum));
 
-#if UNITY_EDITOR
-        TerrainConfig.SetComputeShaderConstant(_gValue.GetType(), _gValue, cmd);
-#else
-        // cmd.SetGlobalBuffer("GlobalValueBuffer", _uploadGValueStructBuffer);
-#endif
+        _gValue.UpdateValue(cmd);
     }
 
     private void CreateLODNodeList(CommandBuffer cmd, int kIndex)
@@ -278,6 +285,7 @@ public class TerrainGPUDriven
         command.CopyCounterValue(_culledPatchList, _argsBuffer, 4);
         command.SetGlobalBuffer(TerrainConfig.SID_ArgsBuffer, _argsBuffer);
         command.SetGlobalBuffer(TerrainConfig.SID_BlockPatchList, _culledPatchList);
+
         command.DrawMeshInstancedIndirect(
             _mesh,
             subMeshIndex,
@@ -318,29 +326,35 @@ public class TerrainGPUDriven
 
 
     private uint3[] _readBackPatchList;
-    private RenderPatch[] _readBackRenderPatchList;
 
-    public uint3[] ReadBackHandler(CommandBuffer command, in uint[] outArr)
+    public uint3[] ReadBackHandler(CommandBuffer cmd)
     {
         if (_readBackPatchList == null)
             _readBackPatchList = new uint3[_finalNodeList.count];
-        _finalNodeList.GetData(_readBackPatchList);
-        command.CopyCounterValue(_finalNodeList, mDispatchArgsBuffer, 0);
-        mDispatchArgsBuffer.GetData(_nodeLODDispatchArr);
-        outArr[0] = _nodeLODDispatchArr[0];
+        cmd.RequestAsyncReadback(_finalNodeList, (data) =>
+            {
+                var nativeArray = data.GetData<uint3>();
+                nativeArray.CopyTo(_readBackPatchList);
+            }
+        );
 
-        command.CopyCounterValue(_culledPatchList, mDispatchArgsBuffer2, 0);
-        mDispatchArgsBuffer2.GetData(_nodeLODDispatchArr);
-        outArr[1] = _nodeLODDispatchArr[0];
+        cmd.RequestAsyncReadback(mDispatchArgsBuffer, (data) =>
+            {
+                var nativeArray = data.GetData<uint>();
+                nativeArray.CopyTo(_nodeLODDispatchArr);
+                RendererFeatureTerrain.sGPUInfo[0] = _nodeLODDispatchArr[0];
+            }
+        );
+
+        cmd.CopyCounterValue(_culledPatchList, mDispatchArgsBuffer2, 0);
+        cmd.RequestAsyncReadback(mDispatchArgsBuffer2, (data) =>
+            {
+                var nativeArray = data.GetData<uint>();
+                nativeArray.CopyTo(_nodeLODDispatchArr);
+                RendererFeatureTerrain.sGPUInfo[1] = _nodeLODDispatchArr[0];
+            }
+        );
         return _readBackPatchList;
-    }
-
-    public RenderPatch[] ReadBackRenderHandler()
-    {
-        if (_readBackRenderPatchList == null)
-            _readBackRenderPatchList = new RenderPatch[_culledPatchList.count];
-        _culledPatchList.GetData(_readBackRenderPatchList);
-        return _readBackRenderPatchList;
     }
 
     private Mesh CreateQuardMesh(int size, float gridSize = 1)
@@ -351,13 +365,19 @@ public class TerrainGPUDriven
 
         Mesh mesh = new Mesh();
         Vector3[] vertices = new Vector3[(gridSizeX + 1) * (gridSizeY + 1)];
+        Vector2[] uv = new Vector2[vertices.Length]; // 添加 UV 数组
+
         for (int x = 0; x <= gridSizeX; x++)
         {
             for (int y = 0; y <= gridSizeY; y++)
             {
                 float posx = (float)x * gridSize;
                 float posz = (float)y * gridSize;
-                vertices[y * (gridSizeX + 1) + x] = new Vector3(posx, 0, posz);
+                int index = y * (gridSizeX + 1) + x;
+                vertices[index] = new Vector3(posx, 0, posz);
+
+                // 计算 UV 值
+                uv[index] = new Vector2((float)x / gridSizeX, (float)y / gridSizeY);
             }
         }
 
@@ -380,11 +400,13 @@ public class TerrainGPUDriven
         }
 
         mesh.vertices = vertices;
+        mesh.uv = uv; // 设置 UV
         mesh.triangles = triangles;
         mesh.RecalculateNormals();
         mesh.RecalculateTangents();
         return mesh;
     }
+
 
     void ReleaseBuffer()
     {

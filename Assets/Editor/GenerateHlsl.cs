@@ -6,8 +6,36 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Windows;
 
-public class GenerateHLSL : MonoBehaviour
+public class GenerateHLSL
 {
+    [MenuItem("Tools/SavedImages")]
+    private static void SavedImages()
+    {
+        // SaveTex2DArrayToPNG(VirtualTexture.ttt, "Assets/SavedImages/savedArray.png");
+    }
+
+    static void SaveTex2DArrayToPNG(RenderTexture texArray, string filePath)
+    {
+        int width = texArray.width;
+        int height = texArray.height;
+        int depth = texArray.volumeDepth;
+
+        // 创建一个新的 2D 纹理，用于临时存储每个层的像素数据
+        Texture2D tempTex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        byte[] bytes;
+
+        // 遍历 Tex2DArray 的每个层，并保存为 PNG 图像
+        for (int i = 0; i < depth; i++)
+        {
+            var active = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.Default);
+            Graphics.Blit(texArray, active, i, 0);
+            tempTex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            tempTex.Apply();
+            bytes = tempTex.EncodeToPNG();
+            File.WriteAllBytes(filePath.Replace(".png", "_" + i + ".png"), bytes);
+        }
+    }
+
     // [MenuItem("Tools/GenerateNormal")]
     // private static void GenerateNormal()
     // {
@@ -65,11 +93,51 @@ public class GenerateHLSL : MonoBehaviour
         string code = string.Format("#ifndef {0}\n#define {0}\n", "TerrainInfoStruct_CS_HLSL");
         code += GenerateHLSLCode(typeof(NodeInfoStruct), true, false);
         code += GenerateHLSLCode(typeof(RenderPatch), true);
-        // code += GenerateHLSLCode(typeof(NodeInfoStruct), false);
+        // code += GenerateHLSLCode(typeof(MipLevel), true);
         code += GenerateHLSLCode(typeof(GlobalValue), false);
         code += "#endif\n";
         string savePath = "Assets/Resources/Instance/TerrainInfoStruct.cs.hlsl";
         File.WriteAllBytes(savePath, Encoding.UTF8.GetBytes(code));
+    }
+
+    [MenuItem("Tools/GeneratehaderPropertyToIDL")]
+    private static void GeneratehaderPropertyToIDL()
+    {
+        GenerateShaderPropertyToID(typeof(GlobalValue));
+    }
+
+    static void GenerateShaderPropertyToID(Type structType)
+    {
+        FieldInfo[] fields = structType.GetFields(BindingFlags.Public | BindingFlags.Instance);
+        StringBuilder sb = new StringBuilder();
+        StringBuilder sb2 = new StringBuilder();
+        foreach (FieldInfo field in fields)
+        {
+            string fileName = field.Name;
+            var fType = field.FieldType;
+            sb.Append(string.Format("public static int SID{0} = Shader.PropertyToID(\"{0}\");\n", fileName));
+
+            if (field.FieldType == typeof(float))
+            {
+                sb2.Append(string.Format("cmd.SetGlobalFloat(SID{0},{0});\n", fileName));
+            }
+            else if (field.FieldType == typeof(int))
+            {
+                sb2.Append(string.Format("cmd.SetGlobalInt(SID{0},{0});\n", fileName));
+            }
+            else if (fType == typeof(Vector2) || fType == typeof(Vector3) || fType == typeof(Vector4))
+            {
+                sb2.Append(string.Format("cmd.SetGlobalVector(SID{0},{0});\n", fileName));
+            }
+            else
+            {
+                throw new Exception("not find type:" + field.FieldType);
+            }
+        }
+
+        
+        Debug.LogError(sb.ToString() + sb2.ToString());
+        // Debug.LogError(sb2.ToString());
     }
 
     static string GenerateHLSLCode(Type structType, bool isStruct, bool isAddHead_ = true)

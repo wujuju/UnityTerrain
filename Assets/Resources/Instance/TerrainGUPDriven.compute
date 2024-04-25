@@ -21,8 +21,41 @@ AppendStructuredBuffer<uint2> _AppendList;
 ConsumeStructuredBuffer<uint2> _ConsumeList;
 AppendStructuredBuffer<RenderPatch> _CulledPatchList;
 RWTexture2D<float> _NodeSectorMap;
-float _max_height;
+StructuredBuffer<uint> stack;
+float _Max_Height;
 int _CurLOD;
+
+uint GetBoundsMip(Bounds bounds)
+{
+    Bounds boundsUVD = CalBoundUVD(bounds);
+    const float2 size = (boundsUVD.maxPosition.xy - boundsUVD.minPosition.xy) * _HizMapSize.xy;
+    uint2 mipXY = ceil(log2(size));
+    // const uint mip = clamp(max(mipXY.x, mipXY.y), 0, _HizMapSize.z);
+    const uint mip = max(mipXY.x, mipXY.y);
+    return mip;
+}
+
+
+bool IsHizCulling(Bounds bounds)
+{
+    Bounds boundsUVD = CalBoundUVD(bounds);
+    const float2 size = (boundsUVD.maxPosition.xy - boundsUVD.minPosition.xy) * _HizMapSize.xy;
+    uint2 mipXY = ceil(log2(size));
+    const uint mip = clamp(max(mipXY.x, mipXY.y), 0, _HizMapSize.z);
+    const uint2 mipHizMapSize = (uint2)_HizMapSize.xy >> mip;
+    float d1 = SampleHizMap(boundsUVD.minPosition.xy, mip, mipHizMapSize);
+    float d2 = SampleHizMap(boundsUVD.maxPosition.xy, mip, mipHizMapSize);
+    float d3 = SampleHizMap(float2(boundsUVD.minPosition.x, boundsUVD.maxPosition.y), mip, mipHizMapSize);
+    float d4 = SampleHizMap(float2(boundsUVD.maxPosition.x, boundsUVD.minPosition.y), mip, mipHizMapSize);
+
+    #if _REVERSE_Z
+    float depth = boundsUVD.maxPosition.z;
+    return d1 > depth && d2 > depth && d3 > depth && d4 > depth;
+    #else
+    float depth = boundsUVD.minPosition.z;
+    return d1 < depth && d2 < depth && d3 < depth && d4 < depth;
+    #endif
+}
 
 inline bool EvaluateNode(uint2 nodeXY, int nodeSize)
 {
@@ -67,7 +100,6 @@ void CreatePatch(uint3 id : SV_DispatchThreadID, uint3 groupId:SV_GroupID, uint3
     const uint2 nodeXY = nodeLODInfo.xy;
     const uint2 patchXY = groupThreadId.xy;
     renderPatch._wpos.z = nodeLODInfo.z;
-
     const NodeInfoStruct nodeInfo = _NodeStructs[renderPatch._wpos.z];
     const uint2 nodePos = nodeInfo.NodeSize * nodeXY;
     const uint2 patchPosInNode = nodeInfo.PacthSize * patchXY;
@@ -75,8 +107,8 @@ void CreatePatch(uint3 id : SV_DispatchThreadID, uint3 groupId:SV_GroupID, uint3
     const float3 wpos = float3(renderPatch._wpos.x, 0, renderPatch._wpos.y);
 
     float2 minMaxHeight = _HeightMapRT.mips[nodeInfo.HeightMipLevel][nodeXY * _PerNodePacthNum + patchXY].xy;
-    const float3 boundMin = float3(0, minMaxHeight.x * _max_height, 0);
-    const float3 boundMax = float3(nodeInfo.PacthSize, minMaxHeight.y * _max_height, nodeInfo.PacthSize);
+    const float3 boundMin = float3(0, minMaxHeight.x * _Max_Height, 0);
+    const float3 boundMax = float3(nodeInfo.PacthSize, minMaxHeight.y * _Max_Height, nodeInfo.PacthSize);
     Bounds bounds;
     bounds.minPosition = wpos + boundMin;
     bounds.maxPosition = wpos + boundMax;

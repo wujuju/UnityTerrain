@@ -11,63 +11,6 @@ struct Bounds
     float3 maxPosition;
 };
 
-void FixLODConnectSeam(inout float4 vertex, RenderPatch patch)
-{
-    uint4 lodTrans = patch._lodTrans;
-    uint2 vertexIndex = vertex.xz;
-
-    uint lodDelta = lodTrans.x;
-    if (lodDelta > 0 && vertexIndex.x == 0)
-    {
-        uint gridStripCount = 1 << lodDelta;
-        uint modIndex = vertexIndex.y % gridStripCount;
-        if (modIndex > 0)
-        {
-            vertex.z -= modIndex;
-            // uv.y -= * modIndex;
-            return;
-        }
-    }
-
-    lodDelta = lodTrans.y;
-    if (lodDelta > 0 && vertexIndex.y == 0)
-    {
-        uint gridStripCount = 1 << lodDelta;
-        uint modIndex = vertexIndex.x % gridStripCount;
-        if (modIndex > 0)
-        {
-            vertex.x -= modIndex;
-            // uv.x -= uvGridStrip * modIndex;
-            return;
-        }
-    }
-
-    lodDelta = lodTrans.z;
-    if (lodDelta > 0 && vertexIndex.x == _PerPacthGridNum)
-    {
-        uint gridStripCount = 1 << lodDelta;
-        uint modIndex = vertexIndex.y % gridStripCount;
-        if (modIndex > 0)
-        {
-            vertex.z += (gridStripCount - modIndex);
-            // uv.y += uvGridStrip * (gridStripCount - modIndex);
-            return;
-        }
-    }
-
-    lodDelta = lodTrans.w;
-    if (lodDelta > 0 && vertexIndex.y == _PerPacthGridNum)
-    {
-        uint gridStripCount = 1 << lodDelta;
-        uint modIndex = vertexIndex.x % gridStripCount;
-        if (modIndex > 0)
-        {
-            vertex.x += (gridStripCount - modIndex);
-            // uv.x += uvGridStrip * (gridStripCount - modIndex);
-            return;
-        }
-    }
-}
 
 bool IsOutSidePlane(float4 plane, float3 position)
 {
@@ -130,36 +73,64 @@ inline float SampleHizMap(float2 uv, uint mip, uint2 mipHizMapSize)
     return _HizMap.mips[mip][coordinates];
 }
 
-uint GetBoundsMip(Bounds bounds)
+void FixLODConnectSeam(inout float4 vertex, RenderPatch patch)
 {
-    Bounds boundsUVD = CalBoundUVD(bounds);
-    const float2 size = (boundsUVD.maxPosition.xy - boundsUVD.minPosition.xy) * _HizMapSize.xy;
-    uint2 mipXY = ceil(log2(size));
-    // const uint mip = clamp(max(mipXY.x, mipXY.y), 0, _HizMapSize.z);
-    const uint mip = max(mipXY.x, mipXY.y);
-    return mip;
+    uint4 lodTrans = patch._lodTrans;
+    uint2 vertexIndex = vertex.xz;
+
+    uint lodDelta = lodTrans.x;
+    if (lodDelta > 0 && vertexIndex.x == 0)
+    {
+        uint gridStripCount = 1 << lodDelta;
+        uint modIndex = vertexIndex.y % gridStripCount;
+        if (modIndex > 0)
+        {
+            vertex.z -= modIndex;
+            // uv.y -= * modIndex;
+            return;
+        }
+    }
+
+    lodDelta = lodTrans.y;
+    if (lodDelta > 0 && vertexIndex.y == 0)
+    {
+        uint gridStripCount = 1 << lodDelta;
+        uint modIndex = vertexIndex.x % gridStripCount;
+        if (modIndex > 0)
+        {
+            vertex.x -= modIndex;
+            // uv.x -= uvGridStrip * modIndex;
+            return;
+        }
+    }
+
+    lodDelta = lodTrans.z;
+    if (lodDelta > 0 && vertexIndex.x == _PerPacthGridNum)
+    {
+        uint gridStripCount = 1 << lodDelta;
+        uint modIndex = vertexIndex.y % gridStripCount;
+        if (modIndex > 0)
+        {
+            vertex.z += (gridStripCount - modIndex);
+            // uv.y += uvGridStrip * (gridStripCount - modIndex);
+            return;
+        }
+    }
+
+    lodDelta = lodTrans.w;
+    if (lodDelta > 0 && vertexIndex.y == _PerPacthGridNum)
+    {
+        uint gridStripCount = 1 << lodDelta;
+        uint modIndex = vertexIndex.x % gridStripCount;
+        if (modIndex > 0)
+        {
+            vertex.x += (gridStripCount - modIndex);
+            // uv.x += uvGridStrip * (gridStripCount - modIndex);
+            return;
+        }
+    }
 }
 
-bool IsHizCulling(Bounds bounds)
-{
-    Bounds boundsUVD = CalBoundUVD(bounds);
-    const float2 size = (boundsUVD.maxPosition.xy - boundsUVD.minPosition.xy) * _HizMapSize.xy;
-    uint2 mipXY = ceil(log2(size));
-    const uint mip = clamp(max(mipXY.x, mipXY.y), 0, _HizMapSize.z);
-    const uint2 mipHizMapSize = (uint2)_HizMapSize.xy >> mip;
-    float d1 = SampleHizMap(boundsUVD.minPosition.xy, mip, mipHizMapSize);
-    float d2 = SampleHizMap(boundsUVD.maxPosition.xy, mip, mipHizMapSize);
-    float d3 = SampleHizMap(float2(boundsUVD.minPosition.x, boundsUVD.maxPosition.y), mip, mipHizMapSize);
-    float d4 = SampleHizMap(float2(boundsUVD.maxPosition.x, boundsUVD.minPosition.y), mip, mipHizMapSize);
-
-    #if _REVERSE_Z
-    float depth = boundsUVD.maxPosition.z;
-    return d1 > depth && d2 > depth && d3 > depth && d4 > depth;
-    #else
-    float depth = boundsUVD.minPosition.z;
-    return d1 < depth && d2 < depth && d3 < depth && d4 < depth;
-    #endif
-}
 
 half3 GetMipColor(uint mip)
 {

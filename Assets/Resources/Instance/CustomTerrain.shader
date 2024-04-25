@@ -1,9 +1,5 @@
 Shader "Custom/Instance2"
 {
-    Properties
-    {
-        _MainTex ("Albedo Map", 2D) = "white" {}
-    }
     SubShader
     {
         Tags
@@ -15,13 +11,11 @@ Shader "Custom/Instance2"
         ZTest LEqual
         Pass
         {
-            //            Cull Off
             HLSLPROGRAM
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "common.hlsl"
             #pragma vertex vert
-            // #pragma fragment frag
             #pragma fragment frag2
             // #pragma geometry geom2
             #pragma shader_feature _DEBUG_LOD
@@ -40,12 +34,13 @@ Shader "Custom/Instance2"
 
             struct v2f
             {
-                float2 uv : TEXCOORD0;
+                float4 uv : TEXCOORD0;
                 float3 positionWS : TEXCOORD1;
                 half4 normal : TEXCOORD2;
                 half4 tangent : TEXCOORD3;
                 half4 bitangent : TEXCOORD4;
                 half fogFactor : TEXCOORD5;
+                half3 vertexSH : TEXCOORD8;
                 #if _DEBUG_COLOR
                 half3 color : TEXCOORD6;
                 #endif
@@ -53,19 +48,25 @@ Shader "Custom/Instance2"
             };
 
             float4 _MainTex_ST;
-            float _max_height;
-            Texture2D<float4> _MainTex;
+            float _Max_Height;
+            Texture2DArray<float4> _MixedDiffuseTex;
             SamplerState samplerLinearClamp;
-
-            Texture2D<float4> _NormapTex;
+            SamplerState samplerLinearClamp2;
+            Texture2DArray<float4> _MixedNormalTex;
             SamplerState samplerNormalLinearClamp;
             StructuredBuffer<RenderPatch> _BlockPatchList;
             Texture2D<float2> _HeightMapRT;
-            Texture2D<int> _TextureMap;
-            float _TextureUVScale;
+            Texture2DArray<float4> _IndirectMap;
             #if _DEBUG_COLOR
             float3 _debugColor[20];
             #endif
+            float _MipInitial;
+            float _MipLevelMax;
+            float _MipDifference;
+            float _SectorCountX;
+            float _SectorCountY;
+            int2 _CurrentSectorXY;
+            int _IndirectSize;
 
             v2f vert(appdata v, uint instanceID : SV_InstanceID)
             {
@@ -77,18 +78,21 @@ Shader "Custom/Instance2"
                 #endif
 
                 #if _DEBUG_PATCH
-                float3 worldPos = v.positionOS * 0.95 * float3(blockInfo.VertexScale, 1, blockInfo.VertexScale) + float3(patch._wpos.x, 0, patch._wpos.y);
+                float3 worldPos = v.positionOS * 0.98 * float3(blockInfo.VertexScale, 1, blockInfo.VertexScale) + float3(patch._wpos.x, 0, patch._wpos.y);
                 #else
                 float3 worldPos = v.positionOS * float3(blockInfo.VertexScale, 1, blockInfo.VertexScale) + float3(
                     patch._wpos.x, 0, patch._wpos.y);
                 #endif
-                worldPos.y = _HeightMapRT.Load(float3(worldPos.xz, 0)).y * _max_height;
-                o.uv = worldPos.xz % 1024 / 1024.0;
+                worldPos.y = _HeightMapRT.Load(float3(worldPos.xz, 0)).y * _Max_Height;
+                o.uv.xy = worldPos.xz / float2(2048, 2048);
+                o.uv.zw = o.uv * unity_LightmapST.xy + unity_LightmapST.zw;
+                // o.rt = floor((worldPos.xz) / 2);
                 o.positionWS = worldPos;
                 o.clipPos = TransformWorldToHClip(worldPos);
                 half3 viewDirWS = GetWorldSpaceNormalizeViewDir(worldPos);
                 float4 vertexTangent = float4(cross(float3(0, 0, 1), v.normalOS), 1.0);
                 VertexNormalInputs normalInput = GetVertexNormalInputs(v.normalOS, vertexTangent);
+                o.vertexSH = SampleSH(v.normalOS);
                 o.normal = half4(normalInput.normalWS, viewDirWS.x);
                 o.tangent = half4(normalInput.tangentWS, viewDirWS.y);
                 o.bitangent = half4(normalInput.bitangentWS, viewDirWS.z);
@@ -102,24 +106,106 @@ Shader "Custom/Instance2"
                 return o;
             }
 
+            int CalcLod(float2 uv)
+            {
+                float2 dx = ddx(uv);
+                float2 dy = ddy(uv);
+                float rho = max(sqrt(dot(dx, dx)), sqrt(dot(dy, dy)));
+                float lambda = log2(rho);
+                return max(int(lambda + 0.5), 0);
+            }
+
+            StructuredBuffer<int2> _MipLevelList;
+
+            float4 samplePageMipLevelTable(float2 uv, uint mipLevel)
+            {
+                int mipLevelSize = _MipLevelList[mipLevel].x;
+                // if (mipLevel == 0)
+                //     return float4(0.5, 0, 0, 1);
+                // if (mipLevel == 1)
+                //     return float4(1, 0, 0, 1);
+                float4 indirectTalble = _IndirectMap[uint3(uv * mipLevelSize % _IndirectSize, mipLevel)];
+                int phyId = (int)(indirectTalble.z);
+                if (indirectTalble.w == 0)
+                {
+                    mipLevel = mipLevel + 1;
+                    // indirectTalble.xy = indirectTalble.xy *0.5;
+                    mipLevelSize = _MipLevelList[mipLevel].x;
+                }
+                float3 uvNew = float3(
+                    (uv.x - indirectTalble.x) * mipLevelSize,
+                    (uv.y - indirectTalble.y) * mipLevelSize,
+                    phyId);
+                int lod = CalcLod(uvNew.xy * (1 << 9));
+                lod = clamp(lod, 0, 6);
+                // if (phyId==106)
+                // return float4(0, 1, 0, 1);
+                // uint2 xz=uv*mipLevelSize% _IndirectSize;
+                //652:91
+                // if (xz.x == 12 && xz.y ==  27 )
+                //     return float4(0, 1, 0, 1);
+                // if (mipLevel == 1)
+                //     return float4(1, 0, 0, 1);
+                // if (mipLevel == 2)
+                //     return float4(0, 0.5, 0, 1);
+                // if (mipLevel == 3)
+                //     return float4(0, 1, 0, 1);
+                // if (mipLevel == 4)
+                //     return float4(0, 0, 0.5, 1);
+                // if (mipLevel == 5)
+                //     return float4(0, 0, 1, 1);
+                // if (mipLevel == 6)
+                //     return float4(0, 0.5, 0.5, 1);
+                // if (mipLevel == 7)
+                //     return float4(0, 1, 1, 1);
+                // if (phyId == 55)
+                //    return float4(1, 0, 0, 1);
+                // if (phyId == 0)
+                //     return float4(0, 0, 1, 1);
+                // float4 result = SAMPLE_TEXTURE2D_ARRAY_GRAD(_MainTex, samplerLinearClamp, uvNew.xy, uvNew.z, ddxUV,
+                //                   ddyUV);
+                // if (lod == 0)
+                // return float4(0, 0, 1, 1);
+                // return float4(GetMipColor(lod),1);
+                // float4 result = SAMPLE_TEXTURE2D_ARRAY_LOD(_MainTex, samplerLinearClamp, uvNew.xy, uvNew.z,mipLevel*2);
+                float4 result = SAMPLE_TEXTURE2D_ARRAY_LOD(_MixedDiffuseTex, samplerLinearClamp, uvNew.xy, uvNew.z, lod);
+                return result;
+            }
+
             half4 frag2(v2f i) : SV_Target
             {
                 InputData inputData = (InputData)0;
-                real3 albedo = SAMPLE_TEXTURE2D(_MainTex, samplerLinearClamp, i.uv);
-                half3 nrm = UnpackNormal(SAMPLE_TEXTURE2D(_NormapTex, samplerNormalLinearClamp, i.uv));
+                half3 nrm = 0;
+                real3 albedo = 0;
+                // real3 albedo = SAMPLE_TEXTURE2D_ARRAY(_MainTex, samplerLinearClamp, i.uv.xy, i.rtIndex);
+                // half3 nrm = UnpackNormal(
+                //     SAMPLE_TEXTURE2D_ARRAY(_NormapTex, samplerNormalLinearClamp, i.uv.xy, i.rtIndex));
+                uint absMax = max(abs((int)_CurrentSectorXY.x - (int)(i.uv.x * _SectorCountX)),
+                                   abs((int)_CurrentSectorXY.y - (int)(i.uv.y * _SectorCountY)));
+                // uint mipLevel = clamp(absMax / (float)_SectorCountX, 0, 1.) * _MipLevelMax;
+
+                int mipLevelSign = (int)floor((-2.0f * _MipInitial - _MipDifference +
+                        sqrt(8.0f * _MipDifference * absMax +
+                            (2.0f * _MipInitial - _MipDifference) *
+                            (2.0f * _MipInitial - _MipDifference)))
+                    / (2.0f * _MipDifference)) + 1;
+                uint mipLevel = clamp(mipLevelSign, 0, _MipLevelMax);
+                albedo = samplePageMipLevelTable(i.uv.xy, mipLevel);
+
                 half3 normalTS = normalize(nrm.xyz);
                 half3 viewDirWS = half3(i.normal.w, i.tangent.w, i.bitangent.w);
                 inputData.tangentToWorld = half3x3(-i.tangent.xyz, i.bitangent.xyz, i.normal.xyz);
-                inputData.normalWS = TransformTangentToWorld(normalTS, inputData.tangentToWorld);
-                inputData.normalWS = NormalizeNormalPerPixel(inputData.normalWS);
+                // inputData.normalWS = TransformTangentToWorld(normalTS, inputData.tangentToWorld);
+                // inputData.normalWS = NormalizeNormalPerPixel(inputData.normalWS);
+                inputData.normalWS = float3(0, 1, 0);
                 inputData.viewDirectionWS = viewDirWS;
                 inputData.fogCoord = InitializeInputDataFog(float4(i.positionWS, 1.0), i.fogFactor);
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(i.clipPos);
-
+                // inputData.bakedGI = SAMPLE_GI(i.uv.wz, i.vertexSH, inputData.normalWS);
                 inputData.positionWS = i.positionWS;
                 inputData.positionCS = i.clipPos;
 
-                half4 color = UniversalFragmentPBR(inputData, albedo, 0, 0, .5, 1, 0, 1);
+                half4 color = UniversalFragmentPBR(inputData, albedo, 0, 0, 0, 1, 0, 1);
                 color.rgb *= color.a;
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
                 #if  _DEBUG_COLOR

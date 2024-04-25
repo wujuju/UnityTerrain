@@ -37,10 +37,16 @@ public class Init : MonoBehaviour
             float[] pixelData = new float[totalHeightSize * totalHeightSize];
             heightMap = new Texture2D(totalHeightSize, totalHeightSize, TextureFormat.RFloat, false);
             maxHeight = terrains[0].terrainData.heightmapScale.y;
-
+            var terrainBlenderInfos = new TerrainBlenderInfo[terrainNum];
             for (int k = 0; k < terrainNum; k++)
             {
                 var terrain = terrains[k];
+                var terrainData = terrain.terrainData;
+                if (heightSize != (int)terrainData.size.x)
+                {
+                    Debug.LogError("heightSize != (int)terrainData.size.x");
+                    return;
+                }
 
                 var offsetX = (k % splitNumX) * heightSize;
                 var offsetY = ((k / splitNumX)) * heightSize;
@@ -49,16 +55,51 @@ public class Init : MonoBehaviour
                     for (int j = 0; j < heightSize; j++)
                     {
                         pixelData[offsetX + i + (j + offsetY) * totalHeightSize] =
-                            terrain.terrainData.GetHeight(i, j) / maxHeight;
+                            terrainData.GetHeight(i, j) / maxHeight;
                     }
                 }
+
+                TerrainBlenderInfo terrainBlenderInfo = new TerrainBlenderInfo();
+                var controlNum = terrainData.alphamapTextureCount;
+                var splatNum = terrainData.alphamapLayers;
+                terrainBlenderInfo.controls = new Texture[controlNum];
+                terrainBlenderInfo.controls_st = new Vector4[controlNum];
+                terrainBlenderInfo.splats = new Texture[splatNum];
+                terrainBlenderInfo.normals = new Texture[splatNum];
+                terrainBlenderInfo.splats_st = new Vector4[splatNum];
+                terrainBlenderInfo.smoothness = new float[splatNum];
+                terrainBlenderInfo.metallic = new float[splatNum];
+                terrainBlenderInfo.rect = new Rect(offsetX, offsetY, heightSize, heightSize);
+                for (int i = 0; i < controlNum; i++)
+                {
+                    terrainBlenderInfo.controls[i] = terrainData.alphamapTextures[i];
+                    terrainBlenderInfo.controls_st[i] = new Vector4(1f / terrainData.alphamapWidth,
+                        1f / terrainData.alphamapWidth, terrainData.alphamapWidth, terrainData.alphamapWidth);
+                }
+
+                var terrainSize = terrainData.size;
+                for (int i = 0; i < splatNum; i++)
+                {
+                    var terrainLayer = terrainData.terrainLayers[i];
+                    terrainBlenderInfo.splats[i] = terrainLayer.diffuseTexture;
+                    terrainBlenderInfo.normals[i] = terrainLayer.normalMapTexture;
+                    terrainBlenderInfo.smoothness[i] = terrainLayer.smoothness;
+                    terrainBlenderInfo.metallic[i] = terrainLayer.metallic;
+                    var tileSize = terrainLayer.tileSize;
+                    var tileOffset = terrainLayer.tileOffset;
+                    Vector4 splatSt = new Vector4(terrainSize.x / tileSize.x, terrainSize.z / tileSize.y,
+                        tileOffset.x / tileSize.x, tileOffset.y / tileSize.y);
+                    terrainBlenderInfo.splats_st[i] = splatSt;
+                }
+
+                terrainBlenderInfos[k] = terrainBlenderInfo;
             }
 
+            VirtualTexture.terrainBlenderInfos = terrainBlenderInfos;
             heightMap.SetPixelData(pixelData, 0);
             heightMap.Apply();
-
-            var layer = terrains[0].terrainData.terrainLayers[0];
-            RendererFeatureTerrain.SetTerrainTexture(layer.diffuseTexture, layer.normalMapTexture);
+            // var layer = terrains[0].terrainData.terrainLayers[0];
+            // RendererFeatureTerrain.SetTerrainTexture(layer.diffuseTexture, layer.normalMapTexture);
             RendererFeatureTerrain.sIsWorking = false;
             ChangeTerrain();
         }
@@ -178,8 +219,10 @@ public class Init : MonoBehaviour
             var node = nodeList[i];
             var blockInfo = RendererFeatureTerrain.sNodeStructs[node.z];
             var size = blockInfo.NodeSize;
+            uint pId = 0;
             Gizmos.DrawWireCube(new Vector3((node.x + 0.5f) * size, 0, (node.y + 0.5f) * size), vecSize * size);
-            UnityEditor.Handles.Label(new Vector3((node.x + 0.5f) * size, 0, (node.y + 0.5f) * size), node.z + "");
+            UnityEditor.Handles.Label(new Vector3((node.x + 0.5f) * size, 0, (node.y + 0.5f) * size),
+                node.x + ":" + node.y);
         }
     }
 #endif

@@ -17,17 +17,32 @@ public class TerrainConfig
     public static int SID_AppendFinalNodeList;
     public static int SID_FinalNodeList;
     public static int SID_NodeBrunchList;
+    public static int SID_IndirectMap;
     public static int SID_CulledPatchList;
     public static int SID_ArgsBuffer;
     public static int SID_BlockPatchList;
     public static int SID_BlockLODList;
+    public static int SID_MipLevelList;
     public static int SID_HeightMapRT;
     public static int SID_NodeSectorMap;
     public static int SID_HizMap;
     public static int SID_ViewFrustumPlane;
     public static int SID_CurLOD;
+    public static int SID_MixedDiffuseTex;
+    public static int SID_MixedNormalTex;
+    public static int SID_TerrainTexSize;
+    public static int SID_CurrentSectorXY;
+    public static int SID_IndirectList;
+    public static int SID_Node_ST;
+    public static int SID_ZIndex;
+    public static int SID_MipInitial;
+    public static int SID_MipDifference;
+    public static int SID_MipLevelMax;
+    public static int SID_IndirectSize;
+    public static int SID_SectorCountX;
+    public static int SID_SectorCountY;
+    public static int SID_Max_Height;
     public static RenderTexture depthRT;
-
     public static int HeightMipLevel;
 
 
@@ -37,21 +52,20 @@ public class TerrainConfig
         K_CreatePatch = cs.FindKernel("CreatePatch");
         K_CreateNodeSectorMap = cs.FindKernel("CreateNodeSectorMap");
 
-        SID_VPMatrix = Shader.PropertyToID("_VPMatrix");
-        SID_AppendList = Shader.PropertyToID("_AppendList");
-        SID_ConsumeList = Shader.PropertyToID("_ConsumeList");
-        SID_AppendFinalNodeList = Shader.PropertyToID("_AppendFinalNodeList");
-        SID_FinalNodeList = Shader.PropertyToID("_FinalNodeList");
-        SID_CulledPatchList = Shader.PropertyToID("_CulledPatchList");
-        SID_NodeBrunchList = Shader.PropertyToID("_NodeBrunchList");
-        SID_ArgsBuffer = Shader.PropertyToID("_ArgsBuffer");
-        SID_BlockPatchList = Shader.PropertyToID("_BlockPatchList");
-        SID_BlockLODList = Shader.PropertyToID("_NodeStructs");
-        SID_HeightMapRT = Shader.PropertyToID("_HeightMapRT");
-        SID_NodeSectorMap = Shader.PropertyToID("_NodeSectorMap");
-        SID_HizMap = Shader.PropertyToID("_HizMap");
-        SID_CurLOD = Shader.PropertyToID("_CurLOD");
-        SID_ViewFrustumPlane = Shader.PropertyToID("_ViewFrustumPlane");
+        Type type = typeof(TerrainConfig);
+        FieldInfo[] staticFields = type.GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+
+        foreach (FieldInfo field in staticFields)
+        {
+            if (field.Name.StartsWith("SID_"))
+            {
+                var id = Shader.PropertyToID(field.Name.Replace("SID", ""));
+                if (id == 0)
+                    throw new Exception("Shader.PropertyToID not find:" + field.Name);
+                field.SetValue(null, id);
+            }
+        }
+        Debug.LogError(staticFields.Length);
     }
 
     public static int GetHeightMipLevelBySize(int size, int pixSize)
@@ -137,6 +151,22 @@ public class TerrainConfig
         return lodColors[i];
     }
 
+    public static RenderTexture CreateRenderTextureArray(int size, int depth, bool useMipMap,
+        RenderTextureFormat format, TextureWrapMode wrapMode, FilterMode filterMode)
+    {
+        var texture = new RenderTexture(size, size, 0, format,
+            RenderTextureReadWrite.sRGB);
+        texture.volumeDepth = depth;
+        texture.dimension = TextureDimension.Tex2DArray;
+        texture.wrapMode = wrapMode;
+        texture.useMipMap = useMipMap;
+        texture.autoGenerateMips = false;
+        texture.enableRandomWrite = true;
+        texture.filterMode = filterMode;
+        texture.Create();
+        return texture;
+    }
+
     public static void SetComputeShaderConstant(Type structType, object cb, CommandBuffer cs, bool isMember = false)
     {
         FieldInfo[] fields = structType.GetFields(BindingFlags.Public | BindingFlags.Instance);
@@ -185,6 +215,29 @@ public struct GlobalValue
     public int _PerPacthSize;
     public float _LodJudgeFactor;
     public Vector3 _HizMapSize;
+
+    public static int SID_CameraWorldPos = Shader.PropertyToID("_CameraWorldPos");
+    public static int SID_SplitNum = Shader.PropertyToID("_SplitNum");
+    public static int SID_MAXLOD = Shader.PropertyToID("_MAXLOD");
+    public static int SID_TerrainSize = Shader.PropertyToID("_TerrainSize");
+    public static int SID_PerNodePacthNum = Shader.PropertyToID("_PerNodePacthNum");
+    public static int SID_PerPacthGridNum = Shader.PropertyToID("_PerPacthGridNum");
+    public static int SID_PerPacthSize = Shader.PropertyToID("_PerPacthSize");
+    public static int SID_LodJudgeFactor = Shader.PropertyToID("_LodJudgeFactor");
+    public static int SID_HizMapSize = Shader.PropertyToID("_HizMapSize");
+
+    public void UpdateValue(CommandBuffer cmd)
+    {
+        cmd.SetGlobalVector(SID_CameraWorldPos, _CameraWorldPos);
+        cmd.SetGlobalInt(SID_SplitNum, _SplitNum);
+        cmd.SetGlobalInt(SID_MAXLOD, _MAXLOD);
+        cmd.SetGlobalInt(SID_TerrainSize, _TerrainSize);
+        cmd.SetGlobalInt(SID_PerNodePacthNum, _PerNodePacthNum);
+        cmd.SetGlobalInt(SID_PerPacthGridNum, _PerPacthGridNum);
+        cmd.SetGlobalInt(SID_PerPacthSize, _PerPacthSize);
+        cmd.SetGlobalFloat(SID_LodJudgeFactor, _LodJudgeFactor);
+        cmd.SetGlobalVector(SID_HizMapSize, _HizMapSize);
+    }
 };
 
 public struct NodeInfoStruct
@@ -200,6 +253,19 @@ public struct NodeInfoStruct
 
 public struct RenderPatch
 {
+    public uint4 _vt;
     public uint4 _wpos;
     public uint4 _lodTrans;
 };
+
+public struct TerrainBlenderInfo
+{
+    public Rect rect;
+    public Texture[] controls;
+    public Texture[] splats;
+    public Texture[] normals;
+    public Vector4[] controls_st;
+    public Vector4[] splats_st;
+    public float[] smoothness;
+    public float[] metallic;
+}

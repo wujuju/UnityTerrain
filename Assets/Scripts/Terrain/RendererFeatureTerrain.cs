@@ -67,7 +67,6 @@ public class RendererFeatureTerrain : ScriptableRendererFeature
     public bool isManualUpdate;
     private TerrainGPUDriven _terrainGPUDriven;
     public static uint3[] sReadBackPatchList { get; private set; }
-    public static RenderPatch[] sReadBackRenderPatchList { get; private set; }
 
     public static NodeInfoStruct[] sNodeStructs
     {
@@ -75,7 +74,6 @@ public class RendererFeatureTerrain : ScriptableRendererFeature
     }
 
     public static uint[] sGPUInfo { get; protected set; }
-
     public static bool sIsWorking { get; set; }
 
     public override void Create()
@@ -96,25 +94,15 @@ public class RendererFeatureTerrain : ScriptableRendererFeature
     public static void CreateMap(Texture2D heightMap, float maxHeight)
     {
         sIsWorking = true;
-        _s.instanceMaterial.SetFloat("_max_height", maxHeight);
-        _s.computeShader.SetFloat("_max_height", maxHeight);
-        _s._terrainGPUDriven.CreateHeightMap(heightMap);
+        _s._terrainGPUDriven.CreateHeightMap(heightMap,maxHeight);
         _s._terrainGPUDriven.InitTerrain(heightMap.width);
-    }
-
-    public static void SetTerrainTexture(Texture2D mainMap, Texture2D normalMap)
-    {
-        _s.instanceMaterial.SetTexture("_MainTex", mainMap);
-        _s.instanceMaterial.SetTexture("_NormapTex", normalMap);
     }
 
     void OnRenderLater(CommandBuffer cmd)
     {
         if (isPatchReadBack)
         {
-            sReadBackPatchList = _terrainGPUDriven.ReadBackHandler(cmd, sGPUInfo);
-            // if (isMipDebug)
-            //     sReadBackRenderPatchList = _terrainGPUDriven.ReadBackRenderHandler();
+            sReadBackPatchList = _terrainGPUDriven.ReadBackHandler(cmd);
         }
         else
         {
