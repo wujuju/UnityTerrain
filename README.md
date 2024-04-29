@@ -1,6 +1,6 @@
 # 简介
 
-Terrain Virual Texture 简称`RVT`
+Terrain Runtime Virual Texture 简称`RVT`
 
 一种空间换时间的技术
 
