@@ -5,7 +5,7 @@
 #pragma kernel TerrainCheckIndirectMipMap
 #define MY_SAMPLE_TEXTURE2D(textureName,samplerName,coord2) textureName.SampleLevel(samplerName, coord2,0)
 #define TEXTURE2D_SPLAT(textureName) TEXTURE2D(textureName);float4 _ST##textureName
-#define SAMPLE_SPLAT(index,uv)                MY_SAMPLE_TEXTURE2D(_Splat##index,sampler_Splat##index,_ST_Splat##index.xy*uv  + _ST_Splat##index.zw)
+#define SAMPLE_SPLAT(index,uv)                MY_SAMPLE_TEXTURE2D(_Splat##index,sampler_Splat0,_ST_Splat##index.xy*uv  + _ST_Splat##index.zw)
 #define SAMPLE_NORMAL(index,uv)       UnpackNormalScale(MY_SAMPLE_TEXTURE2D(_Normal##index,sampler_Control0, uv), 1)
 
 float4 _ST_Control0;
@@ -20,17 +20,17 @@ TEXTURE2D(_Control2);
 
 
 SAMPLER(sampler_Splat0);
-SAMPLER(sampler_Splat1);
-SAMPLER(sampler_Splat2);
-SAMPLER(sampler_Splat3);
-SAMPLER(sampler_Splat4);
-SAMPLER(sampler_Splat5);
-SAMPLER(sampler_Splat6);
-SAMPLER(sampler_Splat7);
-SAMPLER(sampler_Splat8);
-SAMPLER(sampler_Splat9);
-SAMPLER(sampler_Splat10);
-SAMPLER(sampler_Splat11);
+// SAMPLER(sampler_Splat1);
+// SAMPLER(sampler_Splat2);
+// SAMPLER(sampler_Splat3);
+// SAMPLER(sampler_Splat4);
+// SAMPLER(sampler_Splat5);
+// SAMPLER(sampler_Splat6);
+// SAMPLER(sampler_Splat7);
+// SAMPLER(sampler_Splat8);
+// SAMPLER(sampler_Splat9);
+// SAMPLER(sampler_Splat10);
+// SAMPLER(sampler_Splat11);
 TEXTURE2D_SPLAT(_Splat0);
 TEXTURE2D_SPLAT(_Splat1);
 TEXTURE2D_SPLAT(_Splat2);
@@ -74,12 +74,9 @@ void TerrainIndirectMipMap(uint3 id : SV_DispatchThreadID)
     uint4 data = _IndirectList[id.x];
     int mipLevel = data.z;
     int mipLevelSize = _MipLevelList[mipLevel].x;
-    if (data.w == 0)
-        _IndirectMap[uint3(data.xy % _IndirectSize, mipLevel)] = 0;
-    else
-        _IndirectMap[uint3(data.xy % _IndirectSize, mipLevel)] = float4(data.x / (float)mipLevelSize,
-                                                                        data.y / (float)mipLevelSize,
-                                                                        data.w, 1);
+    _IndirectMap[uint3(data.xy % _IndirectSize, mipLevel)] = float4(data.x / (float)mipLevelSize,
+                                                                    data.y / (float)mipLevelSize,
+                                                                    data.w, 1);
 }
 
 #define MipLevelMax 7
@@ -157,7 +154,7 @@ void TerrainBlender(uint3 id : SV_DispatchThreadID)
     splatControl1 /= (dot(splatControl1, 1) + 6.103515625e-5);
     splatControl2 /= (dot(splatControl2, 1) + 6.103515625e-5);
 
-    float4 mixedDiffuse =
+    half3 mixedDiffuse =
         diffAlbedo0 * splatControl0.r
         + diffAlbedo1 * splatControl0.g
         + diffAlbedo2 * splatControl0.b
@@ -172,18 +169,17 @@ void TerrainBlender(uint3 id : SV_DispatchThreadID)
         + diffAlbedo11 * splatControl2.a;
 
     half3 mixedNormal = nrm0 * splatControl0.r
-            + nrm1 * splatControl0.g
-            + nrm2 * splatControl0.b
-            + nrm3 * splatControl0.a
-            + nrm4 * splatControl1.r
-            + nrm5 * splatControl1.g
-            + nrm6 * splatControl1.b
-            + nrm7 * splatControl1.a
-        // + nrm8 * splatControl2.r
-        // + nrm9 * splatControl2.g
-        // + nrm10 * splatControl2.b
-        // + nrm11 * splatControl2.a
-        ;
+        + nrm1 * splatControl0.g
+        + nrm2 * splatControl0.b
+        + nrm3 * splatControl0.a
+        + nrm4 * splatControl1.r
+        + nrm5 * splatControl1.g
+        + nrm6 * splatControl1.b
+        + nrm7 * splatControl1.a
+        + nrm8 * splatControl2.r
+        + nrm9 * splatControl2.g
+        + nrm10 * splatControl2.b
+        + nrm11 * splatControl2.a;
     #if HAS_HALF
     mixedNormal.z += half(0.01);
     #else

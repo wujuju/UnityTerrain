@@ -82,10 +82,10 @@ Shader "Custom/Instance2"
                 float3 worldPos = v.positionOS * float3(blockInfo.VertexScale, 1, blockInfo.VertexScale) + float3(
                     patch._wpos.x, 0, patch._wpos.y);
                 #endif
+                
                 worldPos.y = _HeightMapRT.Load(float3(worldPos.xz, 0)).y * _Max_Height;
-                o.uv.xy = worldPos.xz / float2(2048, 2048);
+                o.uv.xy = worldPos.xz / float2(_TerrainSize, _TerrainSize);
                 o.uv.zw = o.uv * unity_LightmapST.xy + unity_LightmapST.zw;
-                // o.rt = floor((worldPos.xz) / 2);
                 o.positionWS = worldPos;
                 o.clipPos = TransformWorldToHClip(worldPos);
                 half3 viewDirWS = GetWorldSpaceNormalizeViewDir(worldPos);
@@ -133,6 +133,7 @@ Shader "Custom/Instance2"
                 int lod = CalcLod(uvNew.xy * (1 << 9));
                 lod = clamp(lod, 0, 6);
                 float4 result = SAMPLE_TEXTURE2D_ARRAY_LOD(_MixedDiffuseTex, samplerLinearClamp, uvNew.xy, uvNew.z, lod);
+                // result =float4( GetMipColor(mipLevel),1);
                 return result;
             }
 

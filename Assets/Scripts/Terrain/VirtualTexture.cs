@@ -55,7 +55,7 @@ public class VirtualTexture
         indirectTasks = new int4[MaxTaskCount * 2];
 
         InitializeTerrain();
-        InitializeMipLevle();
+        InitializeMipLevel();
         InitializeTexture(totalRTCount);
         InitializeComputerShader();
         EnqueueMipLevelMax();
@@ -94,7 +94,7 @@ public class VirtualTexture
         sectorCount = sectorCountX * sectorCountZ;
     }
     
-    void InitializeMipLevle()
+    void InitializeMipLevel()
     {
         totalRTCount = 0;
         pageMipLevelTable = new MipLevel[MipLevelMax + 1];
@@ -103,7 +103,7 @@ public class VirtualTexture
         {
             int diameter = CalculateDiameter(i);
             var rtBase = 1 << i;
-            var rtCount = 10 + ((diameter + rtBase - 1) / rtBase + 1) *
+            var rtCount = 15 + ((diameter + rtBase - 1) / rtBase + 1) *
                 ((diameter + rtBase - 1) / rtBase + 1);
 
             totalRTCount += rtCount;
@@ -149,7 +149,6 @@ public class VirtualTexture
         {
             if (!chunk.isFix)
             {
-                // _curRTIdList.Remove2Last(chunk.phyId);
                 _curRTIdList.Remove(chunk.phyTile);
                 _curRTIdList.AddLast(chunk.phyTile);
             }
@@ -214,6 +213,7 @@ public class VirtualTexture
             {
                 _isGenMips = true;
                 albedoMap.GenerateMips();
+                normalMap.GenerateMips();
             }
         }
 

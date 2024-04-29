@@ -135,18 +135,18 @@ void FixLODConnectSeam(inout float4 vertex, RenderPatch patch)
 
 half3 GetMipColor(uint mip)
 {
-    // if (mip == 0)
-    //     return float3(0.5, 0, 0);
-    // if (mip == 1)
-    //     return float3(1, 0, 0);
-    // if (mip == 2)
-    //     return float3(0, 0.5, 0);
-    // if (mip == 3)
-    //     return float3(0, 1, 0);
-    // if (mip == 4)
-    //     return float3(0, 0, 0.5);
-    // if (mip == 5)
-    //     return float3(0, 0, 1);
+    if (mip == 0)
+        return float3(0.5, 0, 0);
+    if (mip == 1)
+        return float3(1, 0, 0);
+    if (mip == 2)
+        return float3(0, 0.5, 0);
+    if (mip == 3)
+        return float3(0, 1, 0);
+    if (mip == 4)
+        return float3(0, 0, 0.5);
+    if (mip == 5)
+        return float3(0, 0, 1);
     if (mip <= 6)
         return 0.5;
     if (mip == 7)
